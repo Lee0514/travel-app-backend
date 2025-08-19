@@ -26,13 +26,14 @@ app.post('/translate', (req, res) => {
   })
 })
 
-// 捕獲所有路由
-app.all('*', (req, res) => {
-  res.json({
-    message: 'Catch all route',
+// 404 處理 - 放在最後
+app.use('*', (req, res) => {
+  res.status(404).json({
+    error: 'Not Found',
     method: req.method,
     path: req.path,
-    originalUrl: req.originalUrl
+    originalUrl: req.originalUrl,
+    availableRoutes: ['GET /', 'GET /hello', 'POST /translate']
   })
 })
 
