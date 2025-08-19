@@ -1,11 +1,14 @@
 export default async function handler(req, res) {
-  // 設置 CORS
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  // 設置 CORS - 必須在所有邏輯之前
+  res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  res.setHeader('Access-Control-Allow-Credentials', 'true')
 
+  // 處理 preflight 請求
   if (req.method === 'OPTIONS') {
-    return res.status(200).end()
+    res.status(200).end()
+    return
   }
 
   if (req.method === 'GET') {
@@ -28,17 +31,37 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: 'DeepL API key not configured' })
       }
 
-      // 先測試不調用 DeepL API
-      return res.status(200).json({
-        message: 'Translation request processed!',
-        received: { text, sourceLang, targetLang },
-        timestamp: new Date().toISOString(),
-        willTranslate: `${text} from ${sourceLang} to ${targetLang}`
-      })
+      // 現在添加真正的 DeepL API 調用
+      const axios = require('axios')
+      
+      // 語言代碼轉換
+      const normalizeLangCode = (lang) => {
+        if (!lang) return 'EN'
+        if (lang.toLowerCase() === 'zh-tw' || lang.toLowerCase() === 'zh-cn')
+          return 'ZH'
+        if (lang.toLowerCase() === 'fr-fr') return 'FR'
+        return lang.toUpperCase()
+      }
+
+      const response = await axios.post(
+        'https://api-free.deepl.com/v2/translate',
+        new URLSearchParams({
+          auth_key: process.env.DeepL_API_KEY,
+          text,
+          source_lang: normalizeLangCode(sourceLang),
+          target_lang: normalizeLangCode(targetLang),
+        }),
+        {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        },
+      )
+
+      return res.status(200).json(response.data)
     } catch (error) {
+      console.error('Translation error:', error.message)
       return res.status(500).json({ 
-        error: 'Server error',
-        details: error.message 
+        error: 'Translation failed',
+        details: error.response?.data || error.message 
       })
     }
   }
