@@ -10,7 +10,8 @@ const DeepL_API_KEY = process.env.DeepL_API_KEY
 // 語言代碼轉換
 const normalizeLangCode = (lang) => {
   if (!lang) return 'EN'
-  if (lang.toLowerCase() === 'zh-tw' || lang.toLowerCase() === 'zh-cn') return 'ZH'
+  if (lang.toLowerCase() === 'zh-tw' || lang.toLowerCase() === 'zh-cn')
+    return 'ZH'
   if (lang.toLowerCase() === 'fr-fr') return 'FR'
   return lang.toUpperCase()
 }
@@ -30,7 +31,7 @@ router.post('/translate', async (req, res) => {
       }),
       {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      }
+      },
     )
 
     res.json(response.data)
