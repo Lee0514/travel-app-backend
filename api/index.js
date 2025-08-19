@@ -1,166 +1,38 @@
 const express = require('express')
 const cors = require('cors')
 const serverless = require('serverless-http')
-const axios = require('axios')
-require('dotenv').config()
 
 const app = express()
 
-// 中間件
 app.use(express.json())
 app.use(cors())
 
-// 測試路由
+// 根路由
 app.get('/', (req, res) => {
+  res.json({ message: 'Minimal API working!' })
+})
+
+// 簡單測試路由
+app.get('/hello', (req, res) => {
+  res.json({ message: 'Hello World!' })
+})
+
+// 翻譯路由
+app.post('/translate', (req, res) => {
   res.json({ 
-    message: 'API is working!',
-    timestamp: new Date().toISOString(),
+    message: 'Translation endpoint reached!',
+    received: req.body,
+    timestamp: new Date().toISOString()
+  })
+})
+
+// 捕獲所有路由
+app.all('*', (req, res) => {
+  res.json({
+    message: 'Catch all route',
+    method: req.method,
     path: req.path,
     originalUrl: req.originalUrl
-  })
-})
-
-// 調試所有請求
-app.use((req, res, next) => {
-  console.log(`${req.method} ${req.path} - ${req.originalUrl}`)
-  console.log('Headers:', req.headers)
-  console.log('Body:', req.body)
-  next()
-})
-
-// 翻譯路由 - 匹配前端請求路徑
-app.post('/translate', async (req, res) => {
-  console.log('Translation route hit!')
-  const { text, sourceLang, targetLang } = req.body
-
-  if (!text) {
-    return res.status(400).json({ error: 'Text is required' })
-  }
-
-  if (!process.env.DeepL_API_KEY) {
-    return res.status(500).json({ error: 'DeepL API key not configured' })
-  }
-
-  try {
-    const response = await axios.post(
-      'https://api-free.deepl.com/v2/translate',
-      new URLSearchParams({
-        auth_key: process.env.DeepL_API_KEY,
-        text,
-        source_lang: sourceLang?.toUpperCase() || 'EN',
-        target_lang: targetLang?.toUpperCase() || 'ZH',
-      }),
-      {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      },
-    )
-
-    res.json(response.data)
-  } catch (err) {
-    console.error('Translation error:', err.message)
-    res.status(500).json({ 
-      error: 'Translation failed',
-      details: err.response?.data || err.message
-    })
-  }
-})
-
-// 測試 POST 路由
-app.post('/test', (req, res) => {
-  res.json({ 
-    message: 'POST test route works!',
-    body: req.body,
-    path: req.path,
-    originalUrl: req.originalUrl
-  })
-})
-
-// 測試 GET 路由
-app.get('/test', (req, res) => {
-  res.json({ 
-    message: 'GET test route works!',
-    query: req.query,
-    path: req.path,
-    originalUrl: req.originalUrl
-  })
-})
-
-// 調試：列出所有路由
-app.get('/debug', (req, res) => {
-  const routes = []
-  app._router.stack.forEach((middleware) => {
-    if (middleware.route) {
-      routes.push({
-        path: middleware.route.path,
-        methods: Object.keys(middleware.route.methods)
-      })
-    } else if (middleware.name === 'router') {
-      middleware.handle.stack.forEach((handler) => {
-        if (handler.route) {
-          routes.push({
-            path: handler.route.path,
-            methods: Object.keys(handler.route.methods)
-          })
-        }
-      })
-    }
-  })
-  res.json({ 
-    message: 'Debug info',
-    routes: routes,
-    requestInfo: {
-      method: req.method,
-      path: req.path,
-      originalUrl: req.originalUrl,
-      headers: req.headers
-    }
-  })
-})
-
-// 也支援舊路徑（向後相容）
-app.post('/translate/translate', async (req, res) => {
-  const { text, sourceLang, targetLang } = req.body
-
-  if (!text) {
-    return res.status(400).json({ error: 'Text is required' })
-  }
-
-  if (!process.env.DeepL_API_KEY) {
-    return res.status(500).json({ error: 'DeepL API key not configured' })
-  }
-
-  try {
-    const response = await axios.post(
-      'https://api-free.deepl.com/v2/translate',
-      new URLSearchParams({
-        auth_key: process.env.DeepL_API_KEY,
-        text,
-        source_lang: sourceLang?.toUpperCase() || 'EN',
-        target_lang: targetLang?.toUpperCase() || 'ZH',
-      }),
-      {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      },
-    )
-
-    res.json(response.data)
-  } catch (err) {
-    console.error('Translation error:', err.message)
-    res.status(500).json({ 
-      error: 'Translation failed',
-      details: err.response?.data || err.message
-    })
-  }
-})
-
-// 健康檢查
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    env: {
-      hasDeepLKey: !!process.env.DeepL_API_KEY
-    }
   })
 })
 
