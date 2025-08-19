@@ -85,6 +85,38 @@ app.get('/test', (req, res) => {
   })
 })
 
+// 調試：列出所有路由
+app.get('/debug', (req, res) => {
+  const routes = []
+  app._router.stack.forEach((middleware) => {
+    if (middleware.route) {
+      routes.push({
+        path: middleware.route.path,
+        methods: Object.keys(middleware.route.methods)
+      })
+    } else if (middleware.name === 'router') {
+      middleware.handle.stack.forEach((handler) => {
+        if (handler.route) {
+          routes.push({
+            path: handler.route.path,
+            methods: Object.keys(handler.route.methods)
+          })
+        }
+      })
+    }
+  })
+  res.json({ 
+    message: 'Debug info',
+    routes: routes,
+    requestInfo: {
+      method: req.method,
+      path: req.path,
+      originalUrl: req.originalUrl,
+      headers: req.headers
+    }
+  })
+})
+
 // 也支援舊路徑（向後相容）
 app.post('/translate/translate', async (req, res) => {
   const { text, sourceLang, targetLang } = req.body
