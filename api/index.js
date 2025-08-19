@@ -19,7 +19,7 @@ app.use((req, res, next) => {
   const fullPath = req.originalUrl || req.url
   const apiPath = fullPath.replace('/api', '') || '/'
   
-  console.log(`Processed path: ${apiPath}`)
+  console.log(`Method: ${req.method}, Full path: ${fullPath}, Processed path: "${apiPath}"`)
   
   // 根據路徑手動路由
   if (req.method === 'GET' && apiPath === '/') {
@@ -60,12 +60,22 @@ app.use((req, res, next) => {
     })
   }
   
-  // 404
+  // 404 - 添加更多調試信息
   res.status(404).json({
     error: 'Not Found',
-    method: req.method,
-    fullPath: fullPath,
-    processedPath: apiPath,
+    debug: {
+      method: req.method,
+      fullPath: fullPath,
+      processedPath: `"${apiPath}"`,
+      pathLength: apiPath.length,
+      matchConditions: {
+        isGet: req.method === 'GET',
+        isPost: req.method === 'POST',
+        isRoot: apiPath === '/',
+        isHello: apiPath === '/hello',
+        isTranslate: apiPath === '/translate'
+      }
+    },
     availableRoutes: ['GET /api/', 'GET /api/hello', 'POST /api/translate']
   })
 })
