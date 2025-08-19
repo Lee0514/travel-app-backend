@@ -4,8 +4,8 @@ require('dotenv').config()
 
 const authRoutes = require('./routes/auth')
 const favoritesRoutes = require('./routes/favorites')
-const translateRoutes = require('./routes/translate');
-const phrasesRoutes = require('./routes/phrases');
+const translateRoutes = require('./routes/translate')
+const phrasesRoutes = require('./routes/phrases')
 
 const app = express()
 app.use(cors())
