@@ -23,7 +23,7 @@ router.post('/', async (req, res) => {
     const DeepL_API_KEY = process.env.DeepL_API_KEY
     
     if (!DeepL_API_KEY) {
-      return res.status(500).json({ error: 'DeepL API key not configured' })
+      return res.status(500).json({ error: 'Translation service not configured' })
     }
 
     const response = await axios.post(
@@ -44,19 +44,17 @@ router.post('/', async (req, res) => {
   } catch (err) {
     console.error('Translation error:', err)
     if (err.response) {
-      res.status(err.response.status).json(err.response.data)
+      res.status(err.response.status).json({
+        error: 'Translation API error',
+        details: err.response.data
+      })
     } else {
-      res.status(500).json({ error: 'Translation failed', message: err.message })
+      res.status(500).json({ 
+        error: 'Translation failed', 
+        message: err.message 
+      })
     }
   }
-})
-
-// 測試路由
-router.get('/test', (req, res) => {
-  res.json({
-    message: 'Translate route is working',
-    hasApiKey: !!process.env.DeepL_API_KEY
-  })
 })
 
 module.exports = router
