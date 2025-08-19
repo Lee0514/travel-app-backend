@@ -7,14 +7,34 @@ const app = express()
 app.use(express.json())
 app.use(cors())
 
-// 根路由
-app.get('/', (req, res) => {
-  res.json({ message: 'Minimal API working!' })
+// 調試中間件
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path} - originalUrl: ${req.originalUrl}`)
+  next()
 })
 
-// 簡單測試路由
+// 根路由
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Minimal API working!',
+    debug: {
+      path: req.path,
+      originalUrl: req.originalUrl,
+      baseUrl: req.baseUrl
+    }
+  })
+})
+
+// hello 路由
 app.get('/hello', (req, res) => {
-  res.json({ message: 'Hello World!' })
+  res.json({ 
+    message: 'Hello World!',
+    debug: {
+      path: req.path,
+      originalUrl: req.originalUrl,
+      baseUrl: req.baseUrl
+    }
+  })
 })
 
 // 翻譯路由
@@ -22,7 +42,12 @@ app.post('/translate', (req, res) => {
   res.json({ 
     message: 'Translation endpoint reached!',
     received: req.body,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    debug: {
+      path: req.path,
+      originalUrl: req.originalUrl,
+      baseUrl: req.baseUrl
+    }
   })
 })
 
@@ -33,6 +58,7 @@ app.use('*', (req, res) => {
     method: req.method,
     path: req.path,
     originalUrl: req.originalUrl,
+    baseUrl: req.baseUrl,
     availableRoutes: ['GET /', 'GET /hello', 'POST /translate']
   })
 })
