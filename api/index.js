@@ -9,57 +9,64 @@ app.use(cors())
 
 // 調試中間件
 app.use((req, res, next) => {
-  console.log(`${req.method} ${req.path} - originalUrl: ${req.originalUrl}`)
+  console.log(`${req.method} ${req.url} - path: ${req.path} - originalUrl: ${req.originalUrl}`)
   next()
 })
 
-// 根路由
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'Minimal API working!',
-    debug: {
-      path: req.path,
-      originalUrl: req.originalUrl,
-      baseUrl: req.baseUrl
-    }
-  })
-})
-
-// hello 路由
-app.get('/hello', (req, res) => {
-  res.json({ 
-    message: 'Hello World!',
-    debug: {
-      path: req.path,
-      originalUrl: req.originalUrl,
-      baseUrl: req.baseUrl
-    }
-  })
-})
-
-// 翻譯路由
-app.post('/translate', (req, res) => {
-  res.json({ 
-    message: 'Translation endpoint reached!',
-    received: req.body,
-    timestamp: new Date().toISOString(),
-    debug: {
-      path: req.path,
-      originalUrl: req.originalUrl,
-      baseUrl: req.baseUrl
-    }
-  })
-})
-
-// 404 處理 - 放在最後
-app.use('*', (req, res) => {
+// 處理所有路由，因為 Vercel 會把路徑重寫
+app.use((req, res, next) => {
+  // 從 originalUrl 中提取真實路徑
+  const fullPath = req.originalUrl || req.url
+  const apiPath = fullPath.replace('/api', '') || '/'
+  
+  console.log(`Processed path: ${apiPath}`)
+  
+  // 根據路徑手動路由
+  if (req.method === 'GET' && apiPath === '/') {
+    return res.json({ 
+      message: 'Minimal API working!',
+      debug: {
+        path: req.path,
+        originalUrl: req.originalUrl,
+        url: req.url,
+        processedPath: apiPath
+      }
+    })
+  }
+  
+  if (req.method === 'GET' && apiPath === '/hello') {
+    return res.json({ 
+      message: 'Hello World!',
+      debug: {
+        path: req.path,
+        originalUrl: req.originalUrl,
+        url: req.url,
+        processedPath: apiPath
+      }
+    })
+  }
+  
+  if (req.method === 'POST' && apiPath === '/translate') {
+    return res.json({ 
+      message: 'Translation endpoint reached!',
+      received: req.body,
+      timestamp: new Date().toISOString(),
+      debug: {
+        path: req.path,
+        originalUrl: req.originalUrl,
+        url: req.url,
+        processedPath: apiPath
+      }
+    })
+  }
+  
+  // 404
   res.status(404).json({
     error: 'Not Found',
     method: req.method,
-    path: req.path,
-    originalUrl: req.originalUrl,
-    baseUrl: req.baseUrl,
-    availableRoutes: ['GET /', 'GET /hello', 'POST /translate']
+    fullPath: fullPath,
+    processedPath: apiPath,
+    availableRoutes: ['GET /api/', 'GET /api/hello', 'POST /api/translate']
   })
 })
 
