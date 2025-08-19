@@ -1,28 +1,40 @@
-const express = require('express')
-const cors = require('cors')
-require('dotenv').config()
+// app.js
+const express = require('express');
+const cors = require('cors');
+require('dotenv').config();
 
-const authRoutes = require('./routes/auth')
-const favoritesRoutes = require('./routes/favorites')
-const translateRoutes = require('./routes/translate')
-const phrasesRoutes = require('./routes/phrases')
+const app = express();
 
-const app = express()
-app.use(cors())
-app.use(express.json())
+// JSON parser
+app.use(express.json());
 
-// 路由掛載
-app.use('/api', (router => {
-  router.use('/auth', authRoutes)
-  router.use('/favorites', favoritesRoutes)
-  router.use('/translate', translateRoutes)
-  router.use('/phrases', phrasesRoutes)
-  return router
-})(express.Router()))
+// CORS 設定
+app.use(
+  cors({
+    origin: [
+      'http://localhost:5173', // 本地前端
+      'https://travel-app-frontend-navy.vercel.app', // 部署前端
+    ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    credentials: true,
+  })
+);
 
+// 健康檢查
+app.get('/', (req, res) => {
+  res.status(200).json({
+    message: 'API is running',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0',
+  });
+});
 
-const PORT = process.env.PORT || 3001
+// 本地開發使用
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => {
+    console.log(`Local server running on http://localhost:${PORT}`);
+  });
+}
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`)
-})
+module.exports = app;
