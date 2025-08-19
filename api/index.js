@@ -23,11 +23,14 @@ app.get('/', (req, res) => {
 // 調試所有請求
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.path} - ${req.originalUrl}`)
+  console.log('Headers:', req.headers)
+  console.log('Body:', req.body)
   next()
 })
 
 // 翻譯路由 - 匹配前端請求路徑
 app.post('/translate', async (req, res) => {
+  console.log('Translation route hit!')
   const { text, sourceLang, targetLang } = req.body
 
   if (!text) {
@@ -60,6 +63,16 @@ app.post('/translate', async (req, res) => {
       details: err.response?.data || err.message
     })
   }
+})
+
+// 測試 POST 路由
+app.post('/test', (req, res) => {
+  res.json({ 
+    message: 'POST test route works!',
+    body: req.body,
+    path: req.path,
+    originalUrl: req.originalUrl
+  })
 })
 
 // 也支援舊路徑（向後相容）
