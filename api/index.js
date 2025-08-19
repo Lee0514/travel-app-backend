@@ -75,6 +75,16 @@ app.post('/test', (req, res) => {
   })
 })
 
+// 測試 GET 路由
+app.get('/test', (req, res) => {
+  res.json({ 
+    message: 'GET test route works!',
+    query: req.query,
+    path: req.path,
+    originalUrl: req.originalUrl
+  })
+})
+
 // 也支援舊路徑（向後相容）
 app.post('/translate/translate', async (req, res) => {
   const { text, sourceLang, targetLang } = req.body
