@@ -1,9 +1,9 @@
 const express = require('express')
 const router = express.Router()
 const axios = require('axios')
-const dotenv = require('dotenv')
 
-dotenv.config()
+// 移除這行：require('dotenv').config()
+// Vercel 會自動處理環境變數
 
 const DeepL_API_KEY = process.env.DeepL_API_KEY
 
@@ -18,9 +18,17 @@ const normalizeLangCode = (lang) => {
 
 // 翻譯 API
 router.post('/', async (req, res) => {
-  const { text, sourceLang, targetLang } = req.body
-
   try {
+    const { text, sourceLang, targetLang } = req.body
+
+    if (!text) {
+      return res.status(400).json({ error: 'Text is required' })
+    }
+
+    if (!DeepL_API_KEY) {
+      return res.status(500).json({ error: 'DeepL API key not configured' })
+    }
+
     const response = await axios.post(
       'https://api-free.deepl.com/v2/translate',
       new URLSearchParams({
@@ -36,15 +44,11 @@ router.post('/', async (req, res) => {
 
     res.json(response.data)
   } catch (err) {
+    console.error('Translation error:', err)
     if (err.response) {
-      console.error('DeepL API Error:', err.response.status, err.response.data)
       res.status(err.response.status).json(err.response.data)
-    } else if (err.request) {
-      console.error('No response from DeepL API:', err.request)
-      res.status(500).json({ error: 'No response from DeepL API' })
     } else {
-      console.error('Axios error:', err.message)
-      res.status(500).json({ error: err.message })
+      res.status(500).json({ error: 'Translation failed' })
     }
   }
 })
