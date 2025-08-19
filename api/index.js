@@ -12,7 +12,18 @@ app.use(cors())
 
 // 測試路由
 app.get('/', (req, res) => {
-  res.json({ message: 'API is working!' })
+  res.json({ 
+    message: 'API is working!',
+    timestamp: new Date().toISOString(),
+    path: req.path,
+    originalUrl: req.originalUrl
+  })
+})
+
+// 調試所有請求
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path} - ${req.originalUrl}`)
+  next()
 })
 
 // 翻譯路由 - 匹配前端請求路徑
