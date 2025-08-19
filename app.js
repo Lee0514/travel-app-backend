@@ -8,7 +8,17 @@ const translateRoutes = require('./routes/translate')
 const phrasesRoutes = require('./routes/phrases')
 
 const app = express()
-app.use(cors())
+// CORS 設定
+app.use(
+  cors({
+    origin: [
+      'https://travel-app-frontend-navy.vercel.app',
+      'http://localhost:5173',
+    ], // 允許的前端網址
+    methods: ['GET', 'POST'],
+    credentials: true,
+  }),
+)
 app.use(express.json())
 
 // 路由掛載
@@ -20,15 +30,6 @@ app.use('/api', (router => {
   router.use('/phrases', phrasesRoutes)
   return router
 })(express.Router()))
-
-// CORS 設定
-app.use(
-  cors({
-    origin: ['https://travel-app-frontend-navy.vercel.app/'], // 允許的前端網址
-    methods: ['GET', 'POST'],
-    credentials: true,
-  }),
-)
 
 const PORT = process.env.PORT || 3001
 

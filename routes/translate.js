@@ -17,7 +17,7 @@ const normalizeLangCode = (lang) => {
 }
 
 // 翻譯 API
-router.post('/translate', async (req, res) => {
+router.post('/', async (req, res) => {
   const { text, sourceLang, targetLang } = req.body
 
   try {
