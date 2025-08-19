@@ -2,8 +2,6 @@ const express = require('express')
 const router = express.Router()
 const axios = require('axios')
 
-const DeepL_API_KEY = process.env.DeepL_API_KEY
-
 // 語言代碼轉換
 const normalizeLangCode = (lang) => {
   if (!lang) return 'EN'
@@ -17,21 +15,16 @@ const normalizeLangCode = (lang) => {
 router.post('/', async (req, res) => {
   try {
     const { text, sourceLang, targetLang } = req.body
-
+    
     if (!text) {
       return res.status(400).json({ error: 'Text is required' })
     }
 
+    const DeepL_API_KEY = process.env.DeepL_API_KEY
+    
     if (!DeepL_API_KEY) {
-      console.error('DeepL API key not found')
-      return res.status(500).json({ error: 'Translation service not configured' })
+      return res.status(500).json({ error: 'DeepL API key not configured' })
     }
-
-    console.log('Translation request:', { 
-      text: text.substring(0, 50) + '...', 
-      sourceLang, 
-      targetLang 
-    })
 
     const response = await axios.post(
       'https://api-free.deepl.com/v2/translate',
@@ -43,25 +36,16 @@ router.post('/', async (req, res) => {
       }),
       {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        timeout: 10000, // 10秒超時
+        timeout: 10000
       },
     )
 
-    console.log('Translation successful')
     res.json(response.data)
   } catch (err) {
-    console.error('Translation error:', err.message)
+    console.error('Translation error:', err)
     if (err.response) {
-      console.error('DeepL API Error:', err.response.status, err.response.data)
-      res.status(err.response.status).json({
-        error: 'Translation API error',
-        details: err.response.data
-      })
-    } else if (err.request) {
-      console.error('No response from DeepL API')
-      res.status(500).json({ error: 'Translation service unavailable' })
+      res.status(err.response.status).json(err.response.data)
     } else {
-      console.error('Request setup error:', err.message)
       res.status(500).json({ error: 'Translation failed', message: err.message })
     }
   }
@@ -71,7 +55,7 @@ router.post('/', async (req, res) => {
 router.get('/test', (req, res) => {
   res.json({
     message: 'Translate route is working',
-    hasApiKey: !!DeepL_API_KEY
+    hasApiKey: !!process.env.DeepL_API_KEY
   })
 })
 
