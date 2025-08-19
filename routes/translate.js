@@ -1,9 +1,8 @@
-// routes/translate.js
+// /routes/translate.js
 const express = require('express');
 const axios = require('axios');
 
 const router = express.Router();
-
 const DeepL_API_KEY = process.env.DEEPL_API_KEY;
 
 // 語言代碼轉換
@@ -14,7 +13,7 @@ const normalizeLangCode = (lang) => {
   return lang.toUpperCase();
 };
 
-// 翻譯 POST
+// POST /api/translate
 router.post('/', async (req, res) => {
   const { text, sourceLang, targetLang } = req.body;
 
@@ -29,7 +28,6 @@ router.post('/', async (req, res) => {
       }),
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
     );
-
     res.json(response.data);
   } catch (err) {
     if (err.response) {

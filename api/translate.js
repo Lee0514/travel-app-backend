@@ -20,12 +20,9 @@ app.use(
 );
 
 // 掛載 router
-// 因為 translateRouter 裡 POST 路徑是 '/', 所以這裡掛在 '/' 即可
 app.use('/', translateRouter);
 
-// ---------------------------
-// 這裡放 serverless export
-// ---------------------------
+// 導出給 Vercel serverless 使用
 module.exports = app;
 module.exports.handler = serverless(app);
 
