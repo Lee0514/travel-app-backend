@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const supabase = require('../supabaseClient')
+const upload = require('../utils/uploadConfig')
 
 // 註冊帳號
 router.post('/signup', async (req, res) => {
@@ -140,15 +141,106 @@ router.post('/logout', async (req, res) => {
     // 執行登出
     const { error } = await supabase.auth.signOut() // 這將終止與 token 相關的會話
     if (error) {
-      console.error('SignOut error:', error)
       return res.status(400).json({ error: error.message })
     }
 
     res.status(200).json({ message: '已成功登出' })
   } catch (error) {
-    console.error('Server error details:', error.stack)
     res.status(500).json({ error: '伺服器錯誤', details: error.message })
   }
 })
+
+// 編輯用戶資料
+router.post(
+  '/edit-profile',
+  upload.single('profileImage'),
+  async (req, res) => {
+    try {
+      const token = req.headers.authorization?.split(' ')[1]
+      if (!token) {
+        return res.status(401).json({ error: '未提供認證 token' })
+      }
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser(token)
+      if (userError || !user) {
+        return res.status(401).json({ error: '無效的認證 token' })
+      }
+
+      const { userName, newPassword, currentPassword } = req.body
+      const profileImage = req.file
+
+      // 更新 userName
+
+      if (userName && userName !== user.user_metadata.userName) {
+        const { error: metadataError } = await supabase.auth.updateUser({
+          data: { userName },
+        })
+        if (metadataError) {
+          return res.status(400).json({ error: metadataError.message })
+        }
+
+        const { error: dbError } = await supabase
+          .from('users')
+          .update({ user_name: userName })
+          .eq('id', user.id)
+        if (dbError) {
+          return res.status(400).json({ error: dbError.message })
+        }
+      }
+
+      // 上傳大頭照
+      let imageUrl = user.user_metadata.profileImage || null
+      if (profileImage) {
+        const fileName = `${user.id}/${Date.now()}-${profileImage.originalname}`
+        const { error: uploadError } = await supabase.storage
+          .from('avatars')
+          .upload(fileName, profileImage.buffer, {
+            contentType: profileImage.mimetype,
+          })
+        if (uploadError) {
+          return res.status(400).json({ error: uploadError.message })
+        }
+
+        imageUrl = `${supabase.storage.from('avatars').getPublicUrl(fileName).publicUrl}`
+        const { error: metadataError } = await supabase.auth.updateUser({
+          data: { profileImage: imageUrl },
+        })
+        if (metadataError) {
+          return res.status(400).json({ error: metadataError.message })
+        }
+      }
+
+      // 修改密碼
+      if (newPassword && currentPassword) {
+        const { error: passwordError } = await supabase.auth.updateUser(
+          {
+            password: newPassword,
+          },
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        )
+        if (passwordError) {
+          return res.status(400).json({ error: passwordError.message })
+        }
+      }
+
+      res.status(200).json({
+        message: '用戶資料更新成功',
+        user: {
+          id: user.id,
+          email: user.email,
+          userName: userName || user.user_metadata.userName,
+          profileImage: imageUrl || user.user_metadata.profileImage,
+        },
+      })
+    } catch (error) {
+      res.status(500).json({ error: '伺服器錯誤', details: error.message })
+    }
+  },
+)
 
 module.exports = router
