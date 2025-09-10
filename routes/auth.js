@@ -3,6 +3,11 @@ const router = express.Router()
 const supabase = require('../supabaseClient')
 const upload = require('../utils/uploadConfig')
 
+const LINE_CLIENT_ID = process.env.LINE_CLIENT_ID
+const LINE_CLIENT_SECRET = process.env.LINE_CLIENT_SECRET
+const LINE_REDIRECT_URI =
+  process.env.LINE_REDIRECT_URI || 'http://localhost:3001/auth/line/callback'
+
 // 註冊帳號
 router.post('/signup', async (req, res) => {
   const { email, password, passwordCheck, userName } = req.body
@@ -214,17 +219,27 @@ router.post(
       }
 
       // 修改密碼
-      if (newPassword && currentPassword) {
-        const { error: passwordError } = await supabase.auth.updateUser(
-          {
-            password: newPassword,
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          },
-        )
-        if (passwordError) {
-          return res.status(400).json({ error: passwordError.message })
+      const { provider } = user // user.provider 會是 'email', 'google', 'line', etc.
+
+      if (provider === 'email') {
+        // 只有 email/password 用戶才可以改密碼
+        if (newPassword && currentPassword) {
+          const { error: passwordError } = await supabase.auth.updateUser(
+            {
+              password: newPassword,
+            },
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            },
+          )
+          if (passwordError) {
+            return res.status(400).json({ error: passwordError.message })
+          }
+        }
+      } else {
+        // Google/Line 用戶不允許改密碼
+        if (newPassword || currentPassword) {
+          return res.status(400).json({ error: '此帳號無法修改密碼' })
         }
       }
 
@@ -242,5 +257,113 @@ router.post(
     }
   },
 )
+// Google OAuth 登入
+router.get('/oauth/:provider', async (req, res) => {
+  const { provider } = req.params
+  console.log('provider', provider)
+  if (!['google', 'line'].includes(provider)) {
+    return res.status(400).json({ error: '不支援的登入方式' })
+  }
+
+  try {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: 'http://localhost:5173/auth/callback', // 前端 callback 頁面
+      },
+    })
+
+    if (error) {
+      return res.status(400).json({ error: error.message })
+    }
+
+    // 回傳 OAuth 登入網址
+    res.status(200).json({ url: data.url })
+  } catch (err) {
+    res.status(500).json({ error: '伺服器錯誤', details: err.message })
+  }
+})
+
+// Step 1: 導向 LINE 授權頁
+router.get('/line', (req, res) => {
+  const lineAuthUrl = `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${LINE_CLIENT_ID}&redirect_uri=${encodeURIComponent(LINE_REDIRECT_URI)}&state=${Date.now()}&scope=profile%20openid%20email`
+  res.redirect(lineAuthUrl)
+})
+
+// Step 2: LINE callback
+router.get('/line/callback', async (req, res) => {
+  const { code } = req.query
+  if (!code) return res.status(400).send('No code returned from LINE')
+
+  try {
+    // Step 2a: 換取 access token
+    const tokenRes = await fetch('https://api.line.me/oauth2/v2.1/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: LINE_REDIRECT_URI,
+        client_id: LINE_CLIENT_ID,
+        client_secret: LINE_CLIENT_SECRET,
+      }),
+    })
+
+    const tokenData = await tokenRes.json()
+    if (tokenData.error) return res.status(400).json(tokenData)
+
+    const { access_token, id_token } = tokenData
+
+    // Step 2b: 用 access token 取得用戶資料
+    const profileRes = await fetch('https://api.line.me/v2/profile', {
+      headers: { Authorization: `Bearer ${access_token}` },
+    })
+    const profile = await profileRes.json()
+
+    // profile 包含 userId, displayName, pictureUrl
+    // Step 2c: 在 Supabase 建立或取得用戶
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('*')
+      .eq('line_id', profile.userId)
+      .single()
+
+    let userId
+
+    if (existingUser) {
+      userId = existingUser.id
+    } else {
+      const { data: newUser } = await supabase
+        .from('users')
+        .insert([
+          {
+            email: null, // LINE 可能沒有 email
+            user_name: profile.displayName,
+            profile_image: profile.pictureUrl,
+            line_id: profile.userId,
+            created_at: new Date(),
+          },
+        ])
+        .select()
+        .single()
+
+      userId = newUser.id
+    }
+
+    // Step 2d: 返回前端，或創建 JWT/session
+    res.status(200).json({
+      message: 'LINE 登入成功',
+      user: {
+        id: userId,
+        user_name: profile.displayName,
+        profileImage: profile.pictureUrl,
+        lineId: profile.userId,
+      },
+    })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'LINE OAuth 登入失敗', details: err.message })
+  }
+})
 
 module.exports = router
