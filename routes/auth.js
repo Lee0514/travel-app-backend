@@ -11,7 +11,6 @@ const LINE_REDIRECT_URI =
 // 註冊帳號
 router.post('/signup', async (req, res) => {
   const { email, password, passwordCheck, userName } = req.body
-
   // 輸入驗證
   if (!email || !password || !userName) {
     return res.status(400).json({ error: '請提供 email、密碼和使用者名稱' })
@@ -74,6 +73,8 @@ router.post('/signup', async (req, res) => {
         email: data.user.email,
         userName: data.user.user_metadata.userName,
       },
+      accessToken: data.session?.access_token,
+      refreshToken: data.session?.refresh_token,
     })
   } catch (error) {
     res.status(500).json({ error: '伺服器錯誤' })
@@ -104,8 +105,10 @@ router.post('/login', async (req, res) => {
         id: data.user.id,
         email: data.user.email,
         userName: data.user.user_metadata.userName,
+        provider: 'email',
       },
-      accessToken: data.session.access_token, // 返回 JWT token
+      accessToken: data.session.access_token,
+      refreshToken: data.session?.refresh_token,
     })
   } catch (error) {
     res.status(500).json({ error: '伺服器錯誤' })
@@ -260,8 +263,8 @@ router.post(
 // Google OAuth 登入
 router.get('/oauth/:provider', async (req, res) => {
   const { provider } = req.params
-  console.log('provider', provider)
-  if (!['google', 'line'].includes(provider)) {
+
+  if (!['google'].includes(provider)) {
     return res.status(400).json({ error: '不支援的登入方式' })
   }
 
@@ -279,6 +282,36 @@ router.get('/oauth/:provider', async (req, res) => {
 
     // 回傳 OAuth 登入網址
     res.status(200).json({ url: data.url })
+  } catch (err) {
+    res.status(500).json({ error: '伺服器錯誤', details: err.message })
+  }
+})
+
+// get user info from google
+router.post('/oauth/google/callback', async (req, res) => {
+  const { accessToken } = req.body // 前端解析 hash 後送給後端
+
+  try {
+    // 用 Supabase accessToken 取得 user
+    const { data, error } = await supabase.auth.getUser(accessToken)
+    if (error || !data.user)
+      return res.status(400).json({ error: '取得使用者資料失敗' })
+
+    const user = data.user
+    const avatar = user.user_metadata.avatar_url || null
+    const provider = user.user_metadata.provider || 'google'
+
+    res.status(200).json({
+      user: {
+        id: user.id,
+        email: user.email,
+        userName: user.user_metadata.userName,
+        avatar,
+        provider,
+      },
+      accessToken,
+      refreshToken: user.refresh_token || null,
+    })
   } catch (err) {
     res.status(500).json({ error: '伺服器錯誤', details: err.message })
   }
@@ -358,6 +391,7 @@ router.get('/line/callback', async (req, res) => {
         user_name: profile.displayName,
         profileImage: profile.pictureUrl,
         lineId: profile.userId,
+        provider: 'line',
       },
     })
   } catch (err) {
