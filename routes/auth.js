@@ -5,8 +5,7 @@ const upload = require('../utils/uploadConfig')
 
 const LINE_CLIENT_ID = process.env.LINE_CLIENT_ID
 const LINE_CLIENT_SECRET = process.env.LINE_CLIENT_SECRET
-const LINE_REDIRECT_URI =
-  process.env.LINE_REDIRECT_URI || 'http://localhost:3001/auth/line/callback'
+const LINE_REDIRECT_URI = `${process.env.BACKEND_URL}/api/auth/line/callback`
 
 // 註冊帳號
 router.post('/signup', async (req, res) => {
@@ -72,6 +71,7 @@ router.post('/signup', async (req, res) => {
         id: data.user.id,
         email: data.user.email,
         userName: data.user.user_metadata.userName,
+        provider: 'email',
       },
       accessToken: data.session?.access_token,
       refreshToken: data.session?.refresh_token,
@@ -222,27 +222,40 @@ router.post(
       }
 
       // 修改密碼
-      const { provider } = user // user.provider 會是 'email', 'google', 'line', etc.
-
+      const { provider } = user?.app_metadata // user.provider 會是 'email', 'google', 'line', etc.
+      // console.log('user', user)
       if (provider === 'email') {
         // 只有 email/password 用戶才可以改密碼
         if (newPassword && currentPassword) {
+          // 1️⃣ 驗證舊密碼是否正確
+          const { data: oldLogin, error: oldLoginError } =
+            await supabase.auth.signInWithPassword({
+              email: user.email,
+              password: currentPassword,
+            })
+
+          if (oldLoginError) {
+            return res.status(400).json({ error: '原密碼錯誤，請重新輸入。' })
+          }
+
+          // 2️⃣ 驗證通過 → 修改密碼
           const { error: passwordError } = await supabase.auth.updateUser(
-            {
-              password: newPassword,
-            },
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            },
+            { password: newPassword },
+            { headers: { Authorization: `Bearer ${token}` } },
           )
+
           if (passwordError) {
             return res.status(400).json({ error: passwordError.message })
           }
+        } else if (newPassword || currentPassword) {
+          return res.status(400).json({ error: '請同時提供舊密碼與新密碼。' })
         }
       } else {
-        // Google/Line 用戶不允許改密碼
+        // Google / LINE 用戶不允許改密碼
         if (newPassword || currentPassword) {
-          return res.status(400).json({ error: '此帳號無法修改密碼' })
+          return res
+            .status(400)
+            .json({ error: '此帳號為第三方登入，無法修改密碼。' })
         }
       }
 
@@ -329,7 +342,7 @@ router.get('/line/callback', async (req, res) => {
   if (!code) return res.status(400).send('No code returned from LINE')
 
   try {
-    // Step 2a: 換取 access token
+    // 1️⃣ 換取 LINE access token
     const tokenRes = await fetch('https://api.line.me/oauth2/v2.1/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -341,58 +354,80 @@ router.get('/line/callback', async (req, res) => {
         client_secret: LINE_CLIENT_SECRET,
       }),
     })
-
     const tokenData = await tokenRes.json()
     if (tokenData.error) return res.status(400).json(tokenData)
 
-    const { access_token, id_token } = tokenData
+    const { access_token } = tokenData
 
-    // Step 2b: 用 access token 取得用戶資料
+    // 2️⃣ 取得 LINE profile
     const profileRes = await fetch('https://api.line.me/v2/profile', {
       headers: { Authorization: `Bearer ${access_token}` },
     })
-    const profile = await profileRes.json()
+    const profile = await profileRes.json() // userId, displayName, pictureUrl
 
-    // profile 包含 userId, displayName, pictureUrl
-    // Step 2c: 在 Supabase 建立或取得用戶
-    const { data: existingUser } = await supabase
-      .from('users')
-      .select('*')
-      .eq('line_id', profile.userId)
-      .single()
+    // 3️⃣ 在 Supabase Auth 中創建或登入使用者
+    const lineEmail = `${profile.userId}@line.local` // 假設 LINE 沒有 email
+    const password = Math.random().toString(36).slice(-12) // 隨機密碼
+    let user
 
-    let userId
+    // 嘗試用 email 登入
+    const { data: signInData, error: signInError } =
+      await supabase.auth.signInWithPassword({
+        email: lineEmail,
+        password,
+      })
 
-    if (existingUser) {
-      userId = existingUser.id
-    } else {
-      const { data: newUser } = await supabase
-        .from('users')
-        .insert([
-          {
-            email: null, // LINE 可能沒有 email
-            user_name: profile.displayName,
-            profile_image: profile.pictureUrl,
-            line_id: profile.userId,
-            created_at: new Date(),
+    if (signInError) {
+      // 如果沒有帳號，創建新帳號
+      const { data: signUpData, error: signUpError } =
+        await supabase.auth.signUp({
+          email: lineEmail,
+          password,
+          options: {
+            data: {
+              userName: profile.displayName,
+              profileImage: profile.pictureUrl,
+              provider: 'line',
+              lineId: profile.userId,
+            },
           },
-        ])
-        .select()
-        .single()
+        })
 
-      userId = newUser.id
+      if (signUpError)
+        return res.status(400).json({ error: signUpError.message })
+      user = signUpData.user
+    } else {
+      user = signInData.user
     }
 
-    // Step 2d: 返回前端，或創建 JWT/session
+    // 4️⃣ 更新 users 表格
+    const { data: dbUser, error: dbError } = await supabase
+      .from('users')
+      .upsert([
+        {
+          id: user.id,
+          email: user.email,
+          user_name: profile.displayName,
+          line_id: profile.userId,
+          created_at: new Date(),
+        },
+      ])
+      .select()
+      .single()
+
+    if (dbError) return res.status(400).json({ error: dbError.message })
+
+    // 5️⃣ 回傳 access token 給前端
     res.status(200).json({
       message: 'LINE 登入成功',
       user: {
-        id: userId,
-        user_name: profile.displayName,
+        id: user.id,
+        userName: profile.displayName,
         profileImage: profile.pictureUrl,
-        lineId: profile.userId,
         provider: 'line',
+        lineId: profile.userId,
       },
+      accessToken: tokenData.access_token,
     })
   } catch (err) {
     console.error(err)
