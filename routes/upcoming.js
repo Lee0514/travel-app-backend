@@ -27,7 +27,7 @@ router.get('/', async (req, res) => {
       events[key].push({
         id: item.id,
         title: item.title,
-        note: item.description || ''
+        note: item.note || ''
       })
     })
 
@@ -52,7 +52,7 @@ router.post('/', async (req, res) => {
 
     const { data, error } = await supabase
       .from('upcoming')
-      .insert([{ user_id: user.id, title, description: note, date }])
+      .insert([{ user_id: user.id, title, note: note, date }])
       .select() // 取得新增後的完整資料
 
     if (error) return res.status(400).json({ error: error.message })
