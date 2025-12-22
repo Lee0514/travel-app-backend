@@ -6,6 +6,7 @@ const authRoutes = require('./routes/auth')
 const favoritesRoutes = require('./routes/favorites')
 const translateRoutes = require('./routes/translate')
 const phrasesRoutes = require('./routes/phrases')
+const upcomingRoutes = require('./routes/upcoming')
 
 const app = express()
 app.use(express.json())
@@ -18,7 +19,8 @@ app.use(
       'https://travel-app-frontend-navy.vercel.app',
       'https://travel-app-frontend-sand.vercel.app',
     ],
-    methods: ['GET', 'POST'],
+    methods: ['GET', 'POST', 'DELETE', 'PUT', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   }),
 )
@@ -28,5 +30,6 @@ app.use('/api/auth', authRoutes)
 app.use('/api/favorites', favoritesRoutes)
 app.use('/api/translate', translateRoutes)
 app.use('/api/phrases', phrasesRoutes)
+app.use('/api/upcoming', upcomingRoutes)
 
 module.exports = app
