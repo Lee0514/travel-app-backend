@@ -37,13 +37,10 @@ router.post('/', async (req, res) => {
     res.json(response.data)
   } catch (err) {
     if (err.response) {
-      console.error('DeepL API Error:', err.response.status, err.response.data)
       res.status(err.response.status).json(err.response.data)
     } else if (err.request) {
-      console.error('No response from DeepL API:', err.request)
       res.status(500).json({ error: 'No response from DeepL API' })
     } else {
-      console.error('Axios error:', err.message)
       res.status(500).json({ error: err.message })
     }
   }
