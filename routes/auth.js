@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const supabase = require('../supabaseClient')
 const upload = require('../utils/uploadConfig')
+const crypto = require('crypto')
 
 const LINE_CLIENT_ID = process.env.LINE_CLIENT_ID
 const LINE_CLIENT_SECRET = process.env.LINE_CLIENT_SECRET
@@ -333,52 +334,64 @@ router.post('/oauth/google/callback', async (req, res) => {
 // Step 1: 導向 LINE 授權頁
 router.get('/line', (req, res) => {
   const lineAuthUrl = `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${LINE_CLIENT_ID}&redirect_uri=${encodeURIComponent(LINE_REDIRECT_URI)}&state=${Date.now()}&scope=profile%20openid%20email`
+  console.log('LINE_REDIRECT_URI:', LINE_REDIRECT_URI)
   res.redirect(lineAuthUrl)
 })
 
 // Step 2: LINE callback
 router.get('/line/callback', async (req, res) => {
-  const { code } = req.query
+  const code = Array.isArray(req.query.code)
+    ? req.query.code[0]
+    : req.query.code
   if (!code) return res.status(400).send('No code returned from LINE')
 
   try {
-    // 1️⃣ 換取 LINE access token
+    // 1) 換 LINE token
     const tokenRes = await fetch('https://api.line.me/oauth2/v2.1/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
-        code,
-        redirect_uri: LINE_REDIRECT_URI,
-        client_id: LINE_CLIENT_ID,
-        client_secret: LINE_CLIENT_SECRET,
+        code: String(code),
+        redirect_uri: String(LINE_REDIRECT_URI),
+        client_id: String(LINE_CLIENT_ID),
+        client_secret: String(LINE_CLIENT_SECRET),
       }),
     })
     const tokenData = await tokenRes.json()
     if (tokenData.error) return res.status(400).json(tokenData)
 
-    const { access_token } = tokenData
+    const { access_token: lineAccessToken } = tokenData
 
-    // 2️⃣ 取得 LINE profile
+    // 2) 取 LINE profile
     const profileRes = await fetch('https://api.line.me/v2/profile', {
-      headers: { Authorization: `Bearer ${access_token}` },
+      headers: { Authorization: `Bearer ${lineAccessToken}` },
     })
     const profile = await profileRes.json() // userId, displayName, pictureUrl
 
-    // 3️⃣ 在 Supabase Auth 中創建或登入使用者
-    const lineEmail = `${profile.userId}@line.local` // 假設 LINE 沒有 email
-    const password = Math.random().toString(36).slice(-12) // 隨機密碼
-    let user
+    const lineEmail = `${profile.userId}@line.local`
 
-    // 嘗試用 email 登入
-    const { data: signInData, error: signInError } =
+    const password = crypto
+      .createHmac('sha256', process.env.LINE_PASSWORD_SECRET)
+      .update(String(profile.userId))
+      .digest('hex')
+      .slice(0, 32)
+
+    let user = null
+    let sessionToken = null
+
+    // 3) 先 signIn
+    let { data: signInData, error: signInError } =
       await supabase.auth.signInWithPassword({
         email: lineEmail,
         password,
       })
 
-    if (signInError) {
-      // 如果沒有帳號，創建新帳號
+    if (!signInError && signInData?.user) {
+      user = signInData.user
+      sessionToken = signInData.session?.access_token || null
+    } else {
+      // 4) signUp
       const { data: signUpData, error: signUpError } =
         await supabase.auth.signUp({
           email: lineEmail,
@@ -393,45 +406,64 @@ router.get('/line/callback', async (req, res) => {
           },
         })
 
-      if (signUpError)
-        return res.status(400).json({ error: signUpError.message })
-      user = signUpData.user
-    } else {
-      user = signInData.user
+      if (signUpError) {
+        // 已註冊 -> 再 signIn 一次
+        if (/already registered/i.test(signUpError.message)) {
+          const { data: signInData2, error: signInError2 } =
+            await supabase.auth.signInWithPassword({
+              email: lineEmail,
+              password,
+            })
+          if (signInError2) {
+            return res.status(400).json({ error: signInError2.message })
+          }
+          user = signInData2.user
+          sessionToken = signInData2.session?.access_token || null
+        } else {
+          return res.status(400).json({ error: signUpError.message })
+        }
+      } else {
+        user = signUpData.user
+        sessionToken = signUpData.session?.access_token || null
+      }
     }
 
-    // 4️⃣ 更新 users 表格
-    const { data: dbUser, error: dbError } = await supabase
-      .from('users')
-      .upsert([
-        {
-          id: user.id,
-          email: user.email,
-          user_name: profile.displayName,
-          line_id: profile.userId,
-          created_at: new Date(),
-        },
-      ])
-      .select()
-      .single()
+    if (!user) return res.status(500).json({ error: 'No user returned' })
+    if (!sessionToken) {
+      // 這通常代表 Supabase 需要 email confirmation 才會給 session
+      // 你用 line.local 假 email 時，很常遇到這個
+      return res.status(500).json({
+        error: 'No Supabase session token returned (email confirmation?)',
+      })
+    }
+
+    // 5) upsert users table
+    const { error: dbError } = await supabase.from('users').upsert([
+      {
+        id: user.id,
+        email: user.email,
+        user_name: profile.displayName,
+        line_id: profile.userId,
+        created_at: new Date(),
+      },
+    ])
 
     if (dbError) return res.status(400).json({ error: dbError.message })
 
-    // 5️⃣ 回傳 access token 給前端
-    res.status(200).json({
-      message: 'LINE 登入成功',
-      user: {
-        id: user.id,
-        userName: profile.displayName,
-        profileImage: profile.pictureUrl,
-        provider: 'line',
-        lineId: profile.userId,
-      },
-      accessToken: tokenData.access_token,
+    // 6) 設 cookie：存 Supabase session token（不是 LINE token）
+    res.cookie('accessToken', sessionToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
     })
+
+    return res.redirect(`${process.env.FRONTEND_URL}/`)
   } catch (err) {
     console.error(err)
-    res.status(500).json({ error: 'LINE OAuth 登入失敗', details: err.message })
+    return res.status(500).json({
+      error: 'LINE OAuth 登入失敗',
+      details: String(err?.message || err),
+    })
   }
 })
 
