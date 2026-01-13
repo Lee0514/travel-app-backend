@@ -286,7 +286,7 @@ router.get('/oauth/:provider', async (req, res) => {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: 'http://localhost:5173/auth/callback', // 前端 callback 頁面
+        redirectTo: `${process.env.FRONTEND_URL}/auth/callback`,
       },
     })
 
