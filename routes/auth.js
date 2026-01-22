@@ -145,7 +145,8 @@ router.post('/logout', async (req, res) => {
   res.clearCookie('accessToken', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    path: '/',
   })
 
   // 2) 兼容 email/google：如果有 Bearer token 再做 signOut（可選）
@@ -407,6 +408,9 @@ router.get('/line/callback', async (req, res) => {
         password,
       })
 
+    console.log('data:', signInData)
+    console.log('error:', signInError)
+
     if (!signInError && signInData?.user) {
       user = signInData.user
       sessionToken = signInData.session?.access_token || null
@@ -424,10 +428,10 @@ router.get('/line/callback', async (req, res) => {
           password,
           options: {
             data: {
-              // userName: toBase64(profile.displayName || ''),
-              // profileImage: profile.pictureUrl,
+              userName: toBase64(profile.displayName || ''),
+              profileImage: profile.pictureUrl,
               provider: 'line',
-              lineId: (String(profile.userId), 'utf8'),
+              lineId: String(profile.userId),
             },
           },
         })
@@ -463,6 +467,27 @@ router.get('/line/callback', async (req, res) => {
       })
     }
 
+    // ✅ 修正既有帳號的 metadata（避免 Vercel undici ByteString）
+    try {
+      const safeName = Buffer.from(
+        String(profile.displayName || ''),
+        'utf8',
+      ).toString('base64')
+      await supabase.auth.updateUser(
+        {
+          data: {
+            userName: safeName, // 或者設 null
+            provider: 'line',
+            lineId: String(profile.userId),
+            profileImage: profile.pictureUrl || null,
+          },
+        },
+        { headers: { Authorization: `Bearer ${sessionToken}` } },
+      )
+    } catch (e) {
+      console.error('[LINE] updateUser metadata failed', e)
+    }
+
     // 5) upsert users table
     const { data: existing, error: existErr } = await supabase
       .from('users')
@@ -478,7 +503,7 @@ router.get('/line/callback', async (req, res) => {
         .from('users')
         .update({
           user_name: profile.displayName,
-          line_id: (String(profile.userId), 'utf8'),
+          line_id: String(profile.userId),
         })
         .eq('email', user.email)
 
@@ -490,7 +515,7 @@ router.get('/line/callback', async (req, res) => {
           id: user.id,
           email: user.email,
           user_name: profile.displayName,
-          line_id: (String(profile.userId), 'utf8'),
+          line_id: String(profile.userId),
           created_at: new Date(),
         },
       ])
@@ -511,6 +536,7 @@ router.get('/line/callback', async (req, res) => {
       httpOnly: true,
       secure: true,
       sameSite: 'none',
+      path: '/',
     })
 
     return res.redirect(`${process.env.FRONTEND_URL}/`)
@@ -525,8 +551,10 @@ router.get('/line/callback', async (req, res) => {
 
 router.get('/me', async (req, res) => {
   try {
-    const token = req.cookies?.accessToken
-    if (!token) return res.status(401).json({ error: 'Not logged in' })
+    const raw = req.cookies?.accessToken
+    if (!raw) return res.status(401).json({ error: 'Not logged in' })
+
+    const token = Buffer.from(String(raw), 'base64url').toString('utf8')
 
     const { data, error } = await supabase.auth.getUser(token)
     if (error || !data.user)
@@ -534,17 +562,26 @@ router.get('/me', async (req, res) => {
 
     const user = data.user
 
-    res.status(200).json({
+    // ✅ 從 users table 拿顯示用資料
+    const { data: row, error: rowErr } = await supabase
+      .from('users')
+      .select('user_name, profile_image, line_id')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    if (rowErr) return res.status(400).json({ error: rowErr.message })
+
+    return res.status(200).json({
       user: {
         id: user.id,
         email: user.email,
-        userName: user.user_metadata?.userName || null,
-        profileImage: user.user_metadata?.profileImage || null,
-        provider: user.app_metadata?.provider || null,
+        userName: row?.user_name ?? null,
+        profileImage: row?.profile_image ?? null,
+        provider: user.app_metadata?.provider ?? null,
       },
     })
   } catch (err) {
-    res
+    return res
       .status(500)
       .json({ error: 'Server error', details: String(err?.message || err) })
   }
