@@ -342,10 +342,12 @@ function assertAscii(label, value) {
 
 // Step 1: 導向 LINE 授權頁
 router.get('/line', (req, res) => {
-  const lineAuthUrl = `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${LINE_CLIENT_ID}&redirect_uri=${encodeURIComponent(LINE_REDIRECT_URI)}&state=${Date.now()}&scope=profile%20openid%20email`
+  const safeRedirectUri = encodeURIComponent(LINE_REDIRECT_URI) // <- encodeURIComponent
+  const lineAuthUrl = `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${LINE_CLIENT_ID}&redirect_uri=${safeRedirectUri}&state=${Date.now()}&scope=profile%20openid%20email`
   res.redirect(lineAuthUrl)
 })
 
+// Step 2: LINE callback
 // Step 2: LINE callback
 router.get('/line/callback', async (req, res) => {
   console.log('[LINE] callback hit', {
@@ -353,7 +355,9 @@ router.get('/line/callback', async (req, res) => {
     state: req.query.state,
   })
 
-  const code = Array.isArray(req.query.code) ? req.query.code[0] : req.query.code
+  const code = Array.isArray(req.query.code)
+    ? req.query.code[0]
+    : req.query.code
   if (!code) return res.status(400).send('No code returned from LINE')
 
   try {
@@ -377,7 +381,6 @@ router.get('/line/callback', async (req, res) => {
 
     // 2) 取 LINE profile
     console.log('[LINE] got tokenData', tokenData?.error ? tokenData : 'ok')
-
     const profileRes = await fetch('https://api.line.me/v2/profile', {
       headers: { Authorization: `Bearer ${lineAccessToken}` },
     })
@@ -385,7 +388,10 @@ router.get('/line/callback', async (req, res) => {
 
     const lineEmail = `${profile.userId}@line.local`
     const password = crypto
-      .createHmac('sha256', Buffer.from(process.env.LINE_PASSWORD_SECRET, 'utf8'))
+      .createHmac(
+        'sha256',
+        Buffer.from(process.env.LINE_PASSWORD_SECRET, 'utf8'),
+      )
       .update(profile.userId, 'utf8')
       .digest('hex')
       .slice(0, 32)
@@ -399,37 +405,39 @@ router.get('/line/callback', async (req, res) => {
     })
 
     // 3) 先 signIn
-    let { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-      email: lineEmail,
-      password,
-    })
+    let { data: signInData, error: signInError } =
+      await supabase.auth.signInWithPassword({
+        email: lineEmail,
+        password,
+      })
 
     if (!signInError && signInData?.user) {
       user = signInData.user
       sessionToken = signInData.session?.access_token || null
     } else {
       // 4) signUp
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-        email: lineEmail,
-        password,
-        options: {
-          data: {
-            provider: 'line',
-            lineId: String(profile.userId),
+      const { data: signUpData, error: signUpError } =
+        await supabase.auth.signUp({
+          email: lineEmail,
+          password,
+          options: {
+            data: {
+              provider: 'line',
+              lineId: String(profile.userId),
+            },
           },
-        },
-      })
+        })
 
       if (signUpError) {
         // 已註冊 -> 再 signIn 一次
         if (/already registered/i.test(signUpError.message)) {
-          const { data: signInData2, error: signInError2 } = await supabase.auth.signInWithPassword({
-            email: lineEmail,
-            password,
-          })
-          if (signInError2) {
+          const { data: signInData2, error: signInError2 } =
+            await supabase.auth.signInWithPassword({
+              email: lineEmail,
+              password,
+            })
+          if (signInError2)
             return res.status(400).json({ error: signInError2.message })
-          }
           user = signInData2.user
           sessionToken = signInData2.session?.access_token || null
         } else {
@@ -442,11 +450,10 @@ router.get('/line/callback', async (req, res) => {
     }
 
     if (!user) return res.status(500).json({ error: 'No user returned' })
-    if (!sessionToken) {
-      return res.status(500).json({
-        error: 'No Supabase session token returned (email confirmation?)',
-      })
-    }
+    if (!sessionToken)
+      return res
+        .status(500)
+        .json({ error: 'No Supabase session token returned' })
 
     // 5) upsert users table
     const { data: existing, error: existErr } = await supabase
@@ -454,14 +461,16 @@ router.get('/line/callback', async (req, res) => {
       .select('id')
       .eq('email', user.email)
       .maybeSingle()
-
     if (existErr) return res.status(400).json({ error: existErr.message })
 
     if (existing?.id) {
-      const { error: updateErr } = await supabase.from('users').update({
-        user_name: profile.displayName,
-        line_id: String(profile.userId),
-      }).eq('email', user.email)
+      const { error: updateErr } = await supabase
+        .from('users')
+        .update({
+          user_name: profile.displayName,
+          line_id: String(profile.userId),
+        })
+        .eq('email', user.email)
       if (updateErr) return res.status(400).json({ error: updateErr.message })
     } else {
       const { error: insertErr } = await supabase.from('users').insert([
@@ -477,26 +486,26 @@ router.get('/line/callback', async (req, res) => {
     }
 
     // 6) 設 cookie（base64url 保證 ASCII 安全）
-    const safeCookieValue = Buffer.from(String(sessionToken), 'utf8').toString('base64url')
+    const safeCookieValue = Buffer.from(String(sessionToken), 'utf8').toString(
+      'base64url',
+    )
     res.cookie('accessToken', safeCookieValue, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
     })
 
-    // 7) 安全 redirect
-    // 如果有帶 query string，先用 encodeURIComponent
-    const afterLogin = req.query.afterLogin || '/'
-    const safeAfterLogin = encodeURIComponent(afterLogin)
+    // 7) 安全 redirect 回前端
+    const afterLogin = req.query.afterLogin || '/' // 從 query 取得要回去的路徑
+    const safeAfterLogin = encodeURIComponent(afterLogin) // 對路徑做 encodeURIComponent
     const safeRedirectUrl = `${encodeURI(process.env.FRONTEND_URL)}/?afterLogin=${safeAfterLogin}`
 
     return res.redirect(safeRedirectUrl)
   } catch (err) {
-    console.error(err)
-    return res.status(500).json({
-      error: 'LINE OAuth 登入失敗',
-      details: String(err?.message || err),
-    })
+    console.error('[LINE] callback error', err)
+    return res
+      .status(500)
+      .json({ error: 'LINE callback 發生錯誤', details: err.message })
   }
 })
 
