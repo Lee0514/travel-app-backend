@@ -337,6 +337,11 @@ router.get('/line', (req, res) => {
 
 // Step 2: LINE callback
 router.get('/line/callback', async (req, res) => {
+  console.log('[LINE] callback hit', {
+    code: req.query.code,
+    state: req.query.state,
+  })
+
   const code = Array.isArray(req.query.code)
     ? req.query.code[0]
     : req.query.code
@@ -344,6 +349,7 @@ router.get('/line/callback', async (req, res) => {
 
   try {
     // 1) 換 LINE token
+    console.log('[LINE] start token exchange')
     const tokenRes = await fetch('https://api.line.me/oauth2/v2.1/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -361,6 +367,8 @@ router.get('/line/callback', async (req, res) => {
     const { access_token: lineAccessToken } = tokenData
 
     // 2) 取 LINE profile
+    console.log('[LINE] got tokenData', tokenData?.error ? tokenData : 'ok')
+
     const profileRes = await fetch('https://api.line.me/v2/profile', {
       headers: { Authorization: `Bearer ${lineAccessToken}` },
     })
@@ -377,6 +385,10 @@ router.get('/line/callback', async (req, res) => {
     let user = null
     let sessionToken = null
 
+    console.log('[LINE] got profile', {
+      userId: profile?.userId,
+      displayName: profile?.displayName,
+    })
     // 3) 先 signIn
     let { data: signInData, error: signInError } =
       await supabase.auth.signInWithPassword({
@@ -469,6 +481,9 @@ router.get('/line/callback', async (req, res) => {
     }
 
     // 6) 設 cookie：存 Supabase session token（不是 LINE token）
+    console.log('typeof sessionToken:', typeof sessionToken)
+    console.log('sessionToken preview:', String(sessionToken).slice(0, 30))
+    console.log('has non-ascii:', /[^\x00-\x7F]/.test(String(sessionToken)))
     res.cookie('accessToken', sessionToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
