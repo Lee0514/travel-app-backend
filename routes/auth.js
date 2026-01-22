@@ -348,7 +348,6 @@ router.get('/line', (req, res) => {
 })
 
 // Step 2: LINE callback
-// Step 2: LINE callback
 router.get('/line/callback', async (req, res) => {
   console.log('[LINE] callback hit', {
     code: req.query.code,
@@ -392,8 +391,8 @@ router.get('/line/callback', async (req, res) => {
         'sha256',
         Buffer.from(process.env.LINE_PASSWORD_SECRET, 'utf8'),
       )
-      .update(profile.userId, 'utf8')
-      .digest('hex')
+      .update(profile.userId, 'latin1')
+      .digest('base64') // base64 永遠 ASCII
       .slice(0, 32)
 
     let user = null
