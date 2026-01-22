@@ -368,7 +368,7 @@ router.get('/line/callback', async (req, res) => {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: String(code),
-        redirect_uri: String(LINE_REDIRECT_URI),
+        redirect_uri: encodeURIComponent(String(LINE_REDIRECT_URI)),
         client_id: String(LINE_CLIENT_ID),
         client_secret: String(LINE_CLIENT_SECRET),
       }),
@@ -380,8 +380,9 @@ router.get('/line/callback', async (req, res) => {
 
     // 2) 取 LINE profile
     console.log('[LINE] got tokenData', tokenData?.error ? tokenData : 'ok')
+    const safeToken = encodeURIComponent(String(lineAccessToken))
     const profileRes = await fetch('https://api.line.me/v2/profile', {
-      headers: { Authorization: `Bearer ${lineAccessToken}` },
+      headers: { Authorization: `Bearer ${safeToken}` },
     })
     const profile = await profileRes.json() // userId, displayName, pictureUrl
 
