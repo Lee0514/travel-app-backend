@@ -389,14 +389,20 @@ router.get('/line/callback', async (req, res) => {
     const lineEmail = `${profile.userId}@line.local`
 
     const password = crypto
-      .createHmac('sha256', process.env.LINE_PASSWORD_SECRET)
-      .update(String(profile.userId))
+      .createHmac(
+        'sha256',
+        Buffer.from(process.env.LINE_PASSWORD_SECRET, 'utf8'),
+      )
+      .update(profile.userId, 'utf8')
       .digest('hex')
       .slice(0, 32)
 
     let user = null
     let sessionToken = null
 
+    console.log('lineEmail', lineEmail)
+
+    console.log('password', password)
     console.log('[LINE] got profile', {
       userId: profile?.userId,
       displayName: profile?.displayName,
@@ -408,13 +414,14 @@ router.get('/line/callback', async (req, res) => {
         password,
       })
 
-    console.log('data:', signInData)
-    console.log('error:', signInError)
-
     if (!signInError && signInData?.user) {
+      console.log('signIn success')
+      console.log('data:', signInData)
       user = signInData.user
       sessionToken = signInData.session?.access_token || null
     } else {
+      console.log('error:', signInError)
+
       // 4) signUp
 
       //把 userName 轉成 base64
@@ -435,8 +442,11 @@ router.get('/line/callback', async (req, res) => {
             },
           },
         })
+      console.log('signUp success')
+      console.log('data:', signUpData)
 
       if (signUpError) {
+        console.log('signUpError:', signUpError)
         // 已註冊 -> 再 signIn 一次
         if (/already registered/i.test(signUpError.message)) {
           const { data: signInData2, error: signInError2 } =
@@ -495,7 +505,10 @@ router.get('/line/callback', async (req, res) => {
       .eq('email', user.email)
       .maybeSingle()
 
-    if (existErr) return res.status(400).json({ error: existErr.message })
+    if (existErr) {
+      console.log('set to supabase error:', existErr)
+      return res.status(400).json({ error: existErr.message })
+    }
 
     if (existing?.id) {
       // 有同 email → update（不要動 id）
