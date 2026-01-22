@@ -369,7 +369,7 @@ router.get('/line/callback', async (req, res) => {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: String(code),
-        redirect_uri: encodeURIComponent(String(LINE_REDIRECT_URI)),
+        redirect_uri: LINE_REDIRECT_URI,
         client_id: String(LINE_CLIENT_ID),
         client_secret: String(LINE_CLIENT_SECRET),
       }),
