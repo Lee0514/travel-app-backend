@@ -145,8 +145,7 @@ router.post('/logout', async (req, res) => {
   res.clearCookie('accessToken', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    path: '/',
+    sameSite: 'lax',
   })
 
   // 2) 兼容 email/google：如果有 Bearer token 再做 signOut（可選）
@@ -354,9 +353,7 @@ router.get('/line/callback', async (req, res) => {
     state: req.query.state,
   })
 
-  const code = Array.isArray(req.query.code)
-    ? req.query.code[0]
-    : req.query.code
+  const code = Array.isArray(req.query.code) ? req.query.code[0] : req.query.code
   if (!code) return res.status(400).send('No code returned from LINE')
 
   try {
@@ -387,12 +384,8 @@ router.get('/line/callback', async (req, res) => {
     const profile = await profileRes.json() // userId, displayName, pictureUrl
 
     const lineEmail = `${profile.userId}@line.local`
-
     const password = crypto
-      .createHmac(
-        'sha256',
-        Buffer.from(process.env.LINE_PASSWORD_SECRET, 'utf8'),
-      )
+      .createHmac('sha256', Buffer.from(process.env.LINE_PASSWORD_SECRET, 'utf8'))
       .update(profile.userId, 'utf8')
       .digest('hex')
       .slice(0, 32)
@@ -400,60 +393,40 @@ router.get('/line/callback', async (req, res) => {
     let user = null
     let sessionToken = null
 
-    console.log('lineEmail', lineEmail)
-
-    console.log('password', password)
     console.log('[LINE] got profile', {
       userId: profile?.userId,
       displayName: profile?.displayName,
     })
+
     // 3) 先 signIn
-    let { data: signInData, error: signInError } =
-      await supabase.auth.signInWithPassword({
-        email: lineEmail,
-        password,
-      })
+    let { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      email: lineEmail,
+      password,
+    })
 
     if (!signInError && signInData?.user) {
-      console.log('signIn success')
-      console.log('data:', signInData)
       user = signInData.user
       sessionToken = signInData.session?.access_token || null
     } else {
-      console.log('error:', signInError)
-
       // 4) signUp
-
-      //把 userName 轉成 base64
-      function toBase64(str) {
-        return Buffer.from(str, 'utf8').toString('base64')
-      }
-
-      const { data: signUpData, error: signUpError } =
-        await supabase.auth.signUp({
-          email: lineEmail,
-          password,
-          options: {
-            data: {
-              userName: toBase64(profile.displayName || ''),
-              profileImage: profile.pictureUrl,
-              provider: 'line',
-              lineId: String(profile.userId),
-            },
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: lineEmail,
+        password,
+        options: {
+          data: {
+            provider: 'line',
+            lineId: String(profile.userId),
           },
-        })
-      console.log('signUp success')
-      console.log('data:', signUpData)
+        },
+      })
 
       if (signUpError) {
-        console.log('signUpError:', signUpError)
         // 已註冊 -> 再 signIn 一次
         if (/already registered/i.test(signUpError.message)) {
-          const { data: signInData2, error: signInError2 } =
-            await supabase.auth.signInWithPassword({
-              email: lineEmail,
-              password,
-            })
+          const { data: signInData2, error: signInError2 } = await supabase.auth.signInWithPassword({
+            email: lineEmail,
+            password,
+          })
           if (signInError2) {
             return res.status(400).json({ error: signInError2.message })
           }
@@ -470,32 +443,9 @@ router.get('/line/callback', async (req, res) => {
 
     if (!user) return res.status(500).json({ error: 'No user returned' })
     if (!sessionToken) {
-      // 這通常代表 Supabase 需要 email confirmation 才會給 session
-      // 你用 line.local 假 email 時，很常遇到這個
       return res.status(500).json({
         error: 'No Supabase session token returned (email confirmation?)',
       })
-    }
-
-    // ✅ 修正既有帳號的 metadata（避免 Vercel undici ByteString）
-    try {
-      const safeName = Buffer.from(
-        String(profile.displayName || ''),
-        'utf8',
-      ).toString('base64')
-      await supabase.auth.updateUser(
-        {
-          data: {
-            userName: safeName, // 或者設 null
-            provider: 'line',
-            lineId: String(profile.userId),
-            profileImage: profile.pictureUrl || null,
-          },
-        },
-        { headers: { Authorization: `Bearer ${sessionToken}` } },
-      )
-    } catch (e) {
-      console.error('[LINE] updateUser metadata failed', e)
     }
 
     // 5) upsert users table
@@ -505,24 +455,15 @@ router.get('/line/callback', async (req, res) => {
       .eq('email', user.email)
       .maybeSingle()
 
-    if (existErr) {
-      console.log('set to supabase error:', existErr)
-      return res.status(400).json({ error: existErr.message })
-    }
+    if (existErr) return res.status(400).json({ error: existErr.message })
 
     if (existing?.id) {
-      // 有同 email → update（不要動 id）
-      const { error: updateErr } = await supabase
-        .from('users')
-        .update({
-          user_name: profile.displayName,
-          line_id: String(profile.userId),
-        })
-        .eq('email', user.email)
-
+      const { error: updateErr } = await supabase.from('users').update({
+        user_name: profile.displayName,
+        line_id: String(profile.userId),
+      }).eq('email', user.email)
       if (updateErr) return res.status(400).json({ error: updateErr.message })
     } else {
-      // 沒有 → insert
       const { error: insertErr } = await supabase.from('users').insert([
         {
           id: user.id,
@@ -535,68 +476,27 @@ router.get('/line/callback', async (req, res) => {
       if (insertErr) return res.status(400).json({ error: insertErr.message })
     }
 
-    // 6) 設 cookie：存 Supabase session token（不是 LINE token）
-    console.log('typeof sessionToken:', typeof sessionToken)
-    console.log('sessionToken preview:', String(sessionToken).slice(0, 30))
-    console.log('has non-ascii:', /[^\x00-\x7F]/.test(String(sessionToken)))
-    assertAscii('sessionToken', sessionToken)
-
-    const safeCookieValue = Buffer.from(String(sessionToken), 'utf8').toString(
-      'base64url',
-    )
-
+    // 6) 設 cookie（base64url 保證 ASCII 安全）
+    const safeCookieValue = Buffer.from(String(sessionToken), 'utf8').toString('base64url')
     res.cookie('accessToken', safeCookieValue, {
       httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      path: '/',
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
     })
 
-    return res.redirect(`${process.env.FRONTEND_URL}/`)
+    // 7) 安全 redirect
+    // 如果有帶 query string，先用 encodeURIComponent
+    const afterLogin = req.query.afterLogin || '/'
+    const safeAfterLogin = encodeURIComponent(afterLogin)
+    const safeRedirectUrl = `${encodeURI(process.env.FRONTEND_URL)}/?afterLogin=${safeAfterLogin}`
+
+    return res.redirect(safeRedirectUrl)
   } catch (err) {
     console.error(err)
     return res.status(500).json({
       error: 'LINE OAuth 登入失敗',
       details: String(err?.message || err),
     })
-  }
-})
-
-router.get('/me', async (req, res) => {
-  try {
-    const raw = req.cookies?.accessToken
-    if (!raw) return res.status(401).json({ error: 'Not logged in' })
-
-    const token = Buffer.from(String(raw), 'base64url').toString('utf8')
-
-    const { data, error } = await supabase.auth.getUser(token)
-    if (error || !data.user)
-      return res.status(401).json({ error: 'Invalid token' })
-
-    const user = data.user
-
-    // ✅ 從 users table 拿顯示用資料
-    const { data: row, error: rowErr } = await supabase
-      .from('users')
-      .select('user_name, profile_image, line_id')
-      .eq('id', user.id)
-      .maybeSingle()
-
-    if (rowErr) return res.status(400).json({ error: rowErr.message })
-
-    return res.status(200).json({
-      user: {
-        id: user.id,
-        email: user.email,
-        userName: row?.user_name ?? null,
-        profileImage: row?.profile_image ?? null,
-        provider: user.app_metadata?.provider ?? null,
-      },
-    })
-  } catch (err) {
-    return res
-      .status(500)
-      .json({ error: 'Server error', details: String(err?.message || err) })
   }
 })
 
