@@ -401,13 +401,19 @@ router.get('/line/callback', async (req, res) => {
       sessionToken = signInData.session?.access_token || null
     } else {
       // 4) signUp
+
+      //把 userName 轉成 base64
+      function toBase64(str) {
+        return Buffer.from(str, 'utf8').toString('base64')
+      }
+
       const { data: signUpData, error: signUpError } =
         await supabase.auth.signUp({
           email: lineEmail,
           password,
           options: {
             data: {
-              userName: profile.displayName,
+              userName: toBase64(profile.displayName || ''),
               profileImage: profile.pictureUrl,
               provider: 'line',
               lineId: profile.userId,
