@@ -413,8 +413,8 @@ router.get('/line/callback', async (req, res) => {
           password,
           options: {
             data: {
-              userName: toBase64(profile.displayName || ''),
-              profileImage: profile.pictureUrl,
+              // userName: toBase64(profile.displayName || ''),
+              // profileImage: profile.pictureUrl,
               provider: 'line',
               lineId: profile.userId,
             },
