@@ -1,5 +1,6 @@
 const express = require('express')
 const cors = require('cors')
+const cookieParser = require('cookie-parser')
 require('dotenv').config()
 
 const authRoutes = require('./routes/auth')
@@ -10,6 +11,7 @@ const upcomingRoutes = require('./routes/upcoming')
 
 const app = express()
 app.use(express.json())
+app.use(cookieParser())
 
 // CORS 設定
 app.use(
