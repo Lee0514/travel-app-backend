@@ -329,6 +329,17 @@ router.post('/oauth/google/callback', async (req, res) => {
   }
 })
 
+// @用來檢查ASCII
+function assertAscii(label, value) {
+  const s = String(value ?? '')
+  const hasNonAscii = /[^\x00-\x7F]/.test(s)
+  if (hasNonAscii) {
+    // 印出前 50 字，避免太長
+    console.error(`[NON-ASCII] ${label}:`, s.slice(0, 50))
+    throw new Error(`NON_ASCII_IN_${label}`)
+  }
+}
+
 // Step 1: 導向 LINE 授權頁
 router.get('/line', (req, res) => {
   const lineAuthUrl = `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${LINE_CLIENT_ID}&redirect_uri=${encodeURIComponent(LINE_REDIRECT_URI)}&state=${Date.now()}&scope=profile%20openid%20email`
@@ -416,7 +427,7 @@ router.get('/line/callback', async (req, res) => {
               // userName: toBase64(profile.displayName || ''),
               // profileImage: profile.pictureUrl,
               provider: 'line',
-              lineId: profile.userId,
+              lineId: (String(profile.userId), 'utf8'),
             },
           },
         })
@@ -467,7 +478,7 @@ router.get('/line/callback', async (req, res) => {
         .from('users')
         .update({
           user_name: profile.displayName,
-          line_id: profile.userId,
+          line_id: (String(profile.userId), 'utf8'),
         })
         .eq('email', user.email)
 
@@ -479,7 +490,7 @@ router.get('/line/callback', async (req, res) => {
           id: user.id,
           email: user.email,
           user_name: profile.displayName,
-          line_id: profile.userId,
+          line_id: (String(profile.userId), 'utf8'),
           created_at: new Date(),
         },
       ])
@@ -490,10 +501,16 @@ router.get('/line/callback', async (req, res) => {
     console.log('typeof sessionToken:', typeof sessionToken)
     console.log('sessionToken preview:', String(sessionToken).slice(0, 30))
     console.log('has non-ascii:', /[^\x00-\x7F]/.test(String(sessionToken)))
-    res.cookie('accessToken', sessionToken, {
+    assertAscii('sessionToken', sessionToken)
+
+    const safeCookieValue = Buffer.from(String(sessionToken), 'utf8').toString(
+      'base64url',
+    )
+
+    res.cookie('accessToken', safeCookieValue, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: true,
+      sameSite: 'none',
     })
 
     return res.redirect(`${process.env.FRONTEND_URL}/`)
