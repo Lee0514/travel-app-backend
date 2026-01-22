@@ -362,14 +362,14 @@ router.get('/line/callback', async (req, res) => {
   try {
     // 1) 換 LINE token
     console.log('[LINE] start token exchange')
-    console.log(encodeURIComponent(String(LINE_REDIRECT_URI)))
+    console.log(LINE_REDIRECT_URI)
     const tokenRes = await fetch('https://api.line.me/oauth2/v2.1/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: String(code),
-        redirect_uri: encodeURIComponent(String(LINE_REDIRECT_URI)),
+        redirect_uri: LINE_REDIRECT_URI,
         client_id: String(LINE_CLIENT_ID),
         client_secret: String(LINE_CLIENT_SECRET),
       }),
