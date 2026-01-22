@@ -141,22 +141,20 @@ router.post('/resend-verification', async (req, res) => {
 
 // 登出
 router.post('/logout', async (req, res) => {
+  // 1) 清 cookie（LINE）
+  res.clearCookie('accessToken', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+  })
+
+  // 2) 兼容 email/google：如果有 Bearer token 再做 signOut（可選）
   try {
     const token = req.headers.authorization?.split(' ')[1]
-    if (!token) {
-      return res.status(401).json({ error: '未提供認證 token' })
-    }
+    if (token) await supabase.auth.signOut()
+  } catch (e) {}
 
-    // 執行登出
-    const { error } = await supabase.auth.signOut() // 這將終止與 token 相關的會話
-    if (error) {
-      return res.status(400).json({ error: error.message })
-    }
-
-    res.status(200).json({ message: '已成功登出' })
-  } catch (error) {
-    res.status(500).json({ error: '伺服器錯誤', details: error.message })
-  }
+  return res.status(200).json({ message: '已成功登出' })
 })
 
 // 編輯用戶資料
@@ -334,7 +332,6 @@ router.post('/oauth/google/callback', async (req, res) => {
 // Step 1: 導向 LINE 授權頁
 router.get('/line', (req, res) => {
   const lineAuthUrl = `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${LINE_CLIENT_ID}&redirect_uri=${encodeURIComponent(LINE_REDIRECT_URI)}&state=${Date.now()}&scope=profile%20openid%20email`
-  console.log('LINE_REDIRECT_URI:', LINE_REDIRECT_URI)
   res.redirect(lineAuthUrl)
 })
 
@@ -438,17 +435,38 @@ router.get('/line/callback', async (req, res) => {
     }
 
     // 5) upsert users table
-    const { error: dbError } = await supabase.from('users').upsert([
-      {
-        id: user.id,
-        email: user.email,
-        user_name: profile.displayName,
-        line_id: profile.userId,
-        created_at: new Date(),
-      },
-    ])
+    const { data: existing, error: existErr } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', user.email)
+      .maybeSingle()
 
-    if (dbError) return res.status(400).json({ error: dbError.message })
+    if (existErr) return res.status(400).json({ error: existErr.message })
+
+    if (existing?.id) {
+      // 有同 email → update（不要動 id）
+      const { error: updateErr } = await supabase
+        .from('users')
+        .update({
+          user_name: profile.displayName,
+          line_id: profile.userId,
+        })
+        .eq('email', user.email)
+
+      if (updateErr) return res.status(400).json({ error: updateErr.message })
+    } else {
+      // 沒有 → insert
+      const { error: insertErr } = await supabase.from('users').insert([
+        {
+          id: user.id,
+          email: user.email,
+          user_name: profile.displayName,
+          line_id: profile.userId,
+          created_at: new Date(),
+        },
+      ])
+      if (insertErr) return res.status(400).json({ error: insertErr.message })
+    }
 
     // 6) 設 cookie：存 Supabase session token（不是 LINE token）
     res.cookie('accessToken', sessionToken, {
@@ -464,6 +482,33 @@ router.get('/line/callback', async (req, res) => {
       error: 'LINE OAuth 登入失敗',
       details: String(err?.message || err),
     })
+  }
+})
+
+router.get('/me', async (req, res) => {
+  try {
+    const token = req.cookies?.accessToken
+    if (!token) return res.status(401).json({ error: 'Not logged in' })
+
+    const { data, error } = await supabase.auth.getUser(token)
+    if (error || !data.user)
+      return res.status(401).json({ error: 'Invalid token' })
+
+    const user = data.user
+
+    res.status(200).json({
+      user: {
+        id: user.id,
+        email: user.email,
+        userName: user.user_metadata?.userName || null,
+        profileImage: user.user_metadata?.profileImage || null,
+        provider: user.app_metadata?.provider || null,
+      },
+    })
+  } catch (err) {
+    res
+      .status(500)
+      .json({ error: 'Server error', details: String(err?.message || err) })
   }
 })
 
