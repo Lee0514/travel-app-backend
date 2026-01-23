@@ -381,19 +381,16 @@ router.get('/line/callback', async (req, res) => {
 
     // 2) 取 LINE profile
     console.log('[LINE] got tokenData', tokenData?.error ? tokenData : 'ok')
-    const safeToken = encodeURIComponent(String(lineAccessToken))
+    // const safeToken = encodeURIComponent(String(lineAccessToken))
     const profileRes = await fetch('https://api.line.me/v2/profile', {
-      headers: { Authorization: `Bearer ${safeToken}` },
+      headers: { Authorization: `Bearer ${lineAccessToken}` },
     })
     const profile = await profileRes.json() // userId, displayName, pictureUrl
 
     const lineEmail = `${profile.userId}@line.local`
     const password = crypto
-      .createHmac(
-        'sha256',
-        Buffer.from(process.env.LINE_PASSWORD_SECRET, 'utf8'),
-      )
-      .update(profile.userId, 'latin1')
+      .createHmac('sha256', process.env.LINE_PASSWORD_SECRET)
+      .update(String(profile.userId))
       .digest('base64') // base64 永遠 ASCII
       .slice(0, 32)
 
