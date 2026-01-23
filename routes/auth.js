@@ -406,6 +406,7 @@ router.get('/line/callback', async (req, res) => {
     })
 
     // 3) 先 signIn
+    console.log(3)
     let { data: signInData, error: signInError } =
       await supabase.auth.signInWithPassword({
         email: lineEmail,
@@ -417,6 +418,7 @@ router.get('/line/callback', async (req, res) => {
       sessionToken = signInData.session?.access_token || null
     } else {
       // 4) signUp
+      console.log(4)
       const { data: signUpData, error: signUpError } =
         await supabase.auth.signUp({
           email: lineEmail,
@@ -430,6 +432,7 @@ router.get('/line/callback', async (req, res) => {
         })
 
       if (signUpError) {
+        console.log(5)
         // 已註冊 -> 再 signIn 一次
         if (/already registered/i.test(signUpError.message)) {
           const { data: signInData2, error: signInError2 } =
@@ -445,6 +448,7 @@ router.get('/line/callback', async (req, res) => {
           return res.status(400).json({ error: signUpError.message })
         }
       } else {
+        console.log(6)
         user = signUpData.user
         sessionToken = signUpData.session?.access_token || null
       }
@@ -457,14 +461,17 @@ router.get('/line/callback', async (req, res) => {
         .json({ error: 'No Supabase session token returned' })
 
     // 5) upsert users table
+    console.log(7)
     const { data: existing, error: existErr } = await supabase
       .from('users')
       .select('id')
       .eq('email', user.email)
       .maybeSingle()
+    console.log('existing data:', existing)
     if (existErr) return res.status(400).json({ error: existErr.message })
 
     if (existing?.id) {
+      console.log('existing?.id:', existing?.id)
       const { error: updateErr } = await supabase
         .from('users')
         .update({
@@ -483,6 +490,7 @@ router.get('/line/callback', async (req, res) => {
           created_at: new Date(),
         },
       ])
+      console.log('insertErr:', insertErr)
       if (insertErr) return res.status(400).json({ error: insertErr.message })
     }
 
@@ -490,6 +498,7 @@ router.get('/line/callback', async (req, res) => {
     const safeCookieValue = Buffer.from(String(sessionToken), 'utf8').toString(
       'base64url',
     )
+    console.log('safeCookieValue:', safeCookieValue)
     res.cookie('accessToken', safeCookieValue, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
