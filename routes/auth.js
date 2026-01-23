@@ -144,8 +144,8 @@ router.post('/logout', async (req, res) => {
   // 1) 清 cookie（LINE）
   res.clearCookie('accessToken', {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: true,
+    sameSite: 'none',
   })
 
   // 2) 兼容 email/google：如果有 Bearer token 再做 signOut（可選）
@@ -222,7 +222,6 @@ router.post(
 
       // 修改密碼
       const { provider } = user?.app_metadata // user.provider 會是 'email', 'google', 'line', etc.
-      // console.log('user', user)
       if (provider === 'email') {
         // 只有 email/password 用戶才可以改密碼
         if (newPassword && currentPassword) {
@@ -349,11 +348,6 @@ router.get('/line', (req, res) => {
 
 // Step 2: LINE callback
 router.get('/line/callback', async (req, res) => {
-  console.log('[LINE] callback hit', {
-    code: req.query.code,
-    state: req.query.state,
-  })
-
   const code = Array.isArray(req.query.code)
     ? req.query.code[0]
     : req.query.code
@@ -361,8 +355,6 @@ router.get('/line/callback', async (req, res) => {
 
   try {
     // 1) 換 LINE token
-    console.log('[LINE] start token exchange')
-    console.log(LINE_REDIRECT_URI)
     const tokenRes = await fetch('https://api.line.me/oauth2/v2.1/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -380,8 +372,6 @@ router.get('/line/callback', async (req, res) => {
     const { access_token: lineAccessToken } = tokenData
 
     // 2) 取 LINE profile
-    console.log('[LINE] got tokenData', tokenData?.error ? tokenData : 'ok')
-    // const safeToken = encodeURIComponent(String(lineAccessToken))
     const profileRes = await fetch('https://api.line.me/v2/profile', {
       headers: { Authorization: `Bearer ${lineAccessToken}` },
     })
@@ -391,19 +381,13 @@ router.get('/line/callback', async (req, res) => {
     const password = crypto
       .createHmac('sha256', process.env.LINE_PASSWORD_SECRET)
       .update(String(profile.userId))
-      .digest('base64') // base64 永遠 ASCII
+      .digest('base64')
       .slice(0, 32)
 
     let user = null
     let sessionToken = null
 
-    console.log('[LINE] got profile', {
-      userId: profile?.userId,
-      displayName: profile?.displayName,
-    })
-
     // 3) 先 signIn
-    console.log(3)
     let { data: signInData, error: signInError } =
       await supabase.auth.signInWithPassword({
         email: lineEmail,
@@ -413,9 +397,25 @@ router.get('/line/callback', async (req, res) => {
     if (!signInError && signInData?.user) {
       user = signInData.user
       sessionToken = signInData.session?.access_token || null
+
+      // ✅ 補寫/更新 user_metadata（避免舊帳號沒有頭像/名稱）
+      try {
+        await supabase.auth.updateUser(
+          {
+            data: {
+              provider: 'line',
+              lineId: String(profile.userId),
+              userName: profile.displayName || null,
+              profileImage: profile.pictureUrl || null,
+            },
+          },
+          { headers: { Authorization: `Bearer ${sessionToken}` } },
+        )
+      } catch (e) {
+        // 失敗不擋登入流程
+      }
     } else {
       // 4) signUp
-      console.log(4)
       const { data: signUpData, error: signUpError } =
         await supabase.auth.signUp({
           email: lineEmail,
@@ -424,12 +424,13 @@ router.get('/line/callback', async (req, res) => {
             data: {
               provider: 'line',
               lineId: String(profile.userId),
+              userName: profile.displayName ?? null,
+              profileImage: profile.pictureUrl ?? null,
             },
           },
         })
 
       if (signUpError) {
-        console.log(5)
         // 已註冊 -> 再 signIn 一次
         if (/already registered/i.test(signUpError.message)) {
           const { data: signInData2, error: signInError2 } =
@@ -445,7 +446,6 @@ router.get('/line/callback', async (req, res) => {
           return res.status(400).json({ error: signUpError.message })
         }
       } else {
-        console.log(6)
         user = signUpData.user
         sessionToken = signUpData.session?.access_token || null
       }
@@ -458,17 +458,14 @@ router.get('/line/callback', async (req, res) => {
         .json({ error: 'No Supabase session token returned' })
 
     // 5) upsert users table
-    console.log(7)
     const { data: existing, error: existErr } = await supabase
       .from('users')
       .select('id')
       .eq('email', user.email)
       .maybeSingle()
-    console.log('existing data:', existing)
     if (existErr) return res.status(400).json({ error: existErr.message })
 
     if (existing?.id) {
-      console.log('existing?.id:', existing?.id)
       const { error: updateErr } = await supabase
         .from('users')
         .update({
@@ -487,7 +484,6 @@ router.get('/line/callback', async (req, res) => {
           created_at: new Date(),
         },
       ])
-      console.log('insertErr:', insertErr)
       if (insertErr) return res.status(400).json({ error: insertErr.message })
     }
 
@@ -495,11 +491,11 @@ router.get('/line/callback', async (req, res) => {
     const safeCookieValue = Buffer.from(String(sessionToken), 'utf8').toString(
       'base64url',
     )
-    console.log('safeCookieValue:', safeCookieValue)
+
     res.cookie('accessToken', safeCookieValue, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: true,
+      sameSite: 'none',
     })
 
     // 7) 安全 redirect 回前端
@@ -513,6 +509,41 @@ router.get('/line/callback', async (req, res) => {
     return res
       .status(500)
       .json({ error: 'LINE callback 發生錯誤', details: err.message })
+  }
+})
+
+// ✅ 取得目前登入者資訊（給前端初始化 Redux 用）
+router.get('/me', async (req, res) => {
+  try {
+    const raw = req.cookies?.accessToken
+    if (!raw) return res.status(401).json({ error: 'Not logged in' })
+
+    // cookie 裡存的是 base64url 的 sessionToken
+    const token = Buffer.from(String(raw), 'base64url').toString('utf8')
+
+    const { data, error } = await supabase.auth.getUser(token)
+    if (error || !data.user) {
+      return res.status(401).json({ error: 'Invalid token' })
+    }
+
+    const user = data.user
+
+    return res.status(200).json({
+      user: {
+        id: user.id,
+        email: user.email,
+        userName: user.user_metadata?.userName || null,
+        avatar:
+          user.user_metadata?.profileImage ||
+          user.user_metadata?.avatar_url ||
+          null,
+        provider: user.app_metadata?.provider || null,
+      },
+    })
+  } catch (err) {
+    return res
+      .status(500)
+      .json({ error: 'Server error', details: String(err?.message || err) })
   }
 })
 
