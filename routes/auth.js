@@ -182,9 +182,10 @@ router.post(
       // 更新 userName
 
       if (userName && userName !== user.user_metadata.userName) {
-        const { error: metadataError } = await supabase.auth.updateUser({
-          data: { userName },
-        })
+        const { error: metadataError } = await supabase.auth.updateUser(
+          { data: { userName } },
+          { headers: { Authorization: `Bearer ${token}` } },
+        )
         if (metadataError) {
           return res.status(400).json({ error: metadataError.message })
         }
@@ -206,18 +207,24 @@ router.post(
           .from('avatars')
           .upload(fileName, profileImage.buffer, {
             contentType: profileImage.mimetype,
+            upsert: true,
           })
+
         if (uploadError) {
           return res.status(400).json({ error: uploadError.message })
         }
 
-        imageUrl = `${supabase.storage.from('avatars').getPublicUrl(fileName).publicUrl}`
-        const { error: metadataError } = await supabase.auth.updateUser({
-          data: { profileImage: imageUrl },
-        })
-        if (metadataError) {
+        const { data: publicData } = supabase.storage
+          .from('avatars')
+          .getPublicUrl(fileName)
+        const imageUrl = publicData?.publicUrl || null
+
+        const { error: metadataError } = await supabase.auth.updateUser(
+          { data: { profileImage: imageUrl } },
+          { headers: { Authorization: `Bearer ${token}` } },
+        )
+        if (metadataError)
           return res.status(400).json({ error: metadataError.message })
-        }
       }
 
       // 修改密碼
@@ -537,7 +544,8 @@ router.get('/me', async (req, res) => {
           user.user_metadata?.profileImage ||
           user.user_metadata?.avatar_url ||
           null,
-        provider: user.app_metadata?.provider || null,
+        provider:
+          user.user_metadata?.provider || user.app_metadata?.provider || null,
       },
     })
   } catch (err) {
