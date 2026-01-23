@@ -537,7 +537,8 @@ router.get('/me', async (req, res) => {
           user.user_metadata?.profileImage ||
           user.user_metadata?.avatar_url ||
           null,
-        provider: user.app_metadata?.provider || null,
+        provider:
+          user.user_metadata?.provider || user.app_metadata?.provider || null,
       },
     })
   } catch (err) {
